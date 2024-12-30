@@ -1,9 +1,10 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from tkinter import ttk
 import threading
-from auth import get_drive_service
-from downloader import extract_file_id, download_file_from_drive, cancel_download
 import os
+from auth import get_drive_service
+from downloader import extract_file_id, download_file_from_drive, cancel_download, check_internet_connection
 
 def start_ui():
     service = get_drive_service()
@@ -11,6 +12,10 @@ def start_ui():
 
     def download_file():
         """Запускает процесс скачивания файла в отдельном потоке."""
+        if not check_internet_connection():
+            messagebox.showerror("Ошибка", "Отсутствует подключение к интернету. Проверьте соединение и попробуйте снова.")
+            return
+        
         url = url_entry.get()
         save_folder = path_entry.get()
 
@@ -34,14 +39,16 @@ def start_ui():
 
         def run_download():
             try:
-                def update_progress(progress):
-                    progress_label.config(text=f"Загрузка: {progress}%")
+                def update_progress(progress_value):
+                    progress["value"] = progress_value
+                    app.update_idletasks()  # Обновляет интерфейс в реальном времени
                 
                 file_name = download_file_from_drive(service, file_id, save_folder, update_progress)
                 messagebox.showinfo("Успех", f"Файл '{file_name}' успешно скачан в папку: {save_folder}")
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Произошла ошибка: {e}")
             finally:
+                progress["value"] = 0  # Сброс прогресса
                 download_button.config(state=tk.NORMAL)
                 cancel_button.config(state=tk.DISABLED)
 
@@ -75,6 +82,10 @@ def start_ui():
     # Метка прогресса
     progress_label = tk.Label(app, text="Ожидание")
     progress_label.pack(pady=5)
+
+    # Прогресс-бар
+    progress = ttk.Progressbar(app, orient="horizontal", length=300, mode="determinate")
+    progress.pack(pady=5)
 
     # Кнопки для скачивания и отмены
     button_frame = tk.Frame(app)

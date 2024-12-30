@@ -1,8 +1,20 @@
 import os
+import socket
 from googleapiclient.http import MediaIoBaseDownload
 import io
 
 stop_download = False
+
+def check_internet_connection():
+    """
+    Проверяет подключение к интернету.
+    Возвращает True, если интернет доступен, иначе False.
+    """
+    try:
+        socket.create_connection(("8.8.8.8", 53), timeout=5)
+        return True
+    except OSError:
+        return False
 
 def extract_file_id(url):
     """

@@ -4,7 +4,13 @@ from tkinter import ttk
 import threading
 import os
 from auth import get_drive_service
-from downloader import extract_file_id, download_file_from_drive, cancel_download, check_internet_connection
+from downloader import (
+    extract_file_id,
+    download_file_from_drive,
+    cancel_download,
+    check_internet_connection,
+    extract_archive,
+)
 
 def start_ui():
     service = get_drive_service()
@@ -43,8 +49,12 @@ def start_ui():
                     progress["value"] = progress_value
                     app.update_idletasks()  # Обновляет интерфейс в реальном времени
                 
-                file_name = download_file_from_drive(service, file_id, save_folder, update_progress)
-                messagebox.showinfo("Успех", f"Файл '{file_name}' успешно скачан в папку: {save_folder}")
+                file_path = download_file_from_drive(service, file_id, save_folder, update_progress)
+                messagebox.showinfo("Успех", f"Файл '{os.path.basename(file_path)}' успешно скачан в папку: {save_folder}")
+                
+                # Попробуем разархивировать файл, если он является архивом
+                extraction_result = extract_archive(file_path, save_folder)
+                messagebox.showinfo("Результат", extraction_result)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Произошла ошибка: {e}")
             finally:

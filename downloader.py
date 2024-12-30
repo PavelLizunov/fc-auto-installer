@@ -1,5 +1,7 @@
 import os
 import socket
+import zipfile
+import tarfile
 from googleapiclient.http import MediaIoBaseDownload
 import io
 
@@ -57,7 +59,27 @@ def download_file_from_drive(service, file_id, save_folder, progress_callback):
             progress = int(status.progress() * 100)
             progress_callback(progress)
 
-    return file_name
+    return file_path
+
+def extract_archive(file_path, extract_to):
+    """
+    Распаковывает архив (ZIP или TAR) в указанную папку.
+    :param file_path: Путь к архиву.
+    :param extract_to: Папка для извлечения.
+    """
+    try:
+        if zipfile.is_zipfile(file_path):
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_to)
+                return "ZIP архив успешно извлечён."
+        elif tarfile.is_tarfile(file_path):
+            with tarfile.open(file_path, 'r:*') as tar_ref:
+                tar_ref.extractall(extract_to)
+                return "TAR архив успешно извлечён."
+        else:
+            return "Файл не является архивом или формат не поддерживается."
+    except Exception as e:
+        raise Exception(f"Ошибка при извлечении архива: {e}")
 
 def cancel_download():
     """Отменяет загрузку."""

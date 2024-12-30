@@ -163,7 +163,6 @@
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\\lib\\asyncio\\windows_utils.py',
    'PYMODULE'),
-  ('auth', 'C:\\Users\\slovn\\minecraft.dev\\auth.py', 'PYMODULE'),
   ('base64',
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\\lib\\base64.py',
@@ -255,7 +254,6 @@
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\\lib\\concurrent\\futures\\thread.py',
    'PYMODULE'),
-  ('config', 'C:\\Users\\slovn\\minecraft.dev\\config.py', 'PYMODULE'),
   ('contextlib',
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\\lib\\contextlib.py',
@@ -304,7 +302,6 @@
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\\lib\\doctest.py',
    'PYMODULE'),
-  ('downloader', 'C:\\Users\\slovn\\minecraft.dev\\downloader.py', 'PYMODULE'),
   ('email',
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\\lib\\email\\__init__.py',
@@ -1334,7 +1331,6 @@
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\\lib\\typing.py',
    'PYMODULE'),
-  ('ui', 'C:\\Users\\slovn\\minecraft.dev\\ui.py', 'PYMODULE'),
   ('unittest',
    'C:\\Program '
    'Files\\WindowsApps\\PythonSoftwareFoundation.Python.3.10_3.10.3056.0_x64__qbz5n2kfra8p0\\lib\\unittest\\__init__.py',

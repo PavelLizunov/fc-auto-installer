@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['main.py'],
+    ['fc-auto-installer.py'],
     pathex=[],
     binaries=[],
     datas=[('C:/Users/slovn/.json/fc-auto-installer-3b84891aacd2.json', '.')],

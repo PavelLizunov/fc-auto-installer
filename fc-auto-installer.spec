@@ -5,7 +5,7 @@ a = Analysis(
     ['fc-auto-installer.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('C:/Users/slovn/.json/fc-auto-installer-3b84891aacd2.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

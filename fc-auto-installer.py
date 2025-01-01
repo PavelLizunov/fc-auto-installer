@@ -13,40 +13,15 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.oauth2.service_account import Credentials
 
 from PyQt5 import QtWidgets, QtCore
-
-# ==================== Конфигурация ====================
-
-# Файлы, которые надо удалить из .minecraft перед копированием
-IGNORED_FILES = ["options.txt", "servers.dat"]
-
-# Папки, которые надо удалить из .minecraft перед копированием
-IGNORED_FOLDERS = ["logs"]  # Можно дополнить своими
-
-# Логика, какие элементы НЕ удаляем в корневой папке
-def should_keep_in_main(item_name: str) -> bool:
-    lower_name = item_name.lower()
-    if lower_name == "saves":
-        return True
-    if "xaero" in lower_name:
-        return True
-    if "distant_horizons_server_data" in lower_name:
-        return True
-    return False
-
-# Путь к JSON с учетными данными Google
-SERVICE_ACCOUNT_FILE = os.path.join(
-    os.path.dirname(__file__),
-    "fc-auto-installer-3b84891aacd2.json"
-)
-
-# ==================== Логгирование ====================
+from PyQt5.QtGui import QFontDatabase, QIcon, QFont, QPixmap, QPainter
+from PyQt5.QtCore import Qt, QRect
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 class QtLogHandler(logging.Handler):
     """
-    Перехватывает логи и отправляет их в QListWidget.
+    Логгирование в QListWidget (Logs).
     """
     def __init__(self, list_widget: QtWidgets.QListWidget):
         super().__init__()
@@ -54,19 +29,19 @@ class QtLogHandler(logging.Handler):
 
     def emit(self, record):
         msg = self.format(record)
-        # В PyQt обновления GUI должны выполняться в основном потоке,
-        # поэтому используем сигнал через invokeMethod или прямое соединение.
-        # Но в простом случае можно и напрямую добавлять:
+        # Добавляем сообщение в QListWidget
         self.list_widget.addItem(msg)
         self.list_widget.scrollToBottom()
+
+# ==================== Константы / Настройки ====================
+
+ARCHIVE_EXTENSIONS = (".zip", ".tar", ".tar.gz", ".tgz", ".rar")
+MODS_FOLDERS = ["mods", "configs"]  # Папки, которые удаляем из main
+MC_FILES_TO_REMOVE = ["options.txt", "server.dat"]  # Файлы, удаляемые в tmp/.minecraft, ЕСЛИ есть такие же в main
 
 # ==================== Вспомогательные функции ====================
 
 def check_internet_connection() -> bool:
-    """
-    Пример проверки сети. Если 8.8.8.8 недоступен, 
-    у некоторых пользователей будет ложное срабатывание.
-    """
     try:
         socket.create_connection(("8.8.8.8", 53), timeout=5)
         return True
@@ -74,9 +49,6 @@ def check_internet_connection() -> bool:
         return False
 
 def extract_file_id(url: str) -> str:
-    """
-    Извлекает file_id из Google Drive URL.
-    """
     if "drive.google.com" in url and "/file/d/" in url:
         return url.split("/file/d/")[-1].split("/")[0]
     elif "id=" in url:
@@ -84,130 +56,23 @@ def extract_file_id(url: str) -> str:
     else:
         raise ValueError("Invalid Google Drive URL format.")
 
-def get_drive_service():
-    """
-    Создаём сервис для Google Drive API.
-    """
+def get_drive_service(service_account_file: str):
     try:
-        credentials = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
+        credentials = Credentials.from_service_account_file(service_account_file)
         service = build('drive', 'v3', credentials=credentials)
         return service
     except FileNotFoundError:
-        raise FileNotFoundError(f"Service account file not found: {SERVICE_ACCOUNT_FILE}")
+        raise FileNotFoundError(f"Service account file not found: {service_account_file}")
     except Exception as e:
         raise Exception(f"Error creating Google Drive service: {e}")
-
-def remove_items_in_main_dir(folder_path: str) -> None:
-    """
-    Удаляет все элементы из корневой папки folder_path,
-    кроме тех, что проходят проверку should_keep_in_main().
-    """
-    for item in os.listdir(folder_path):
-        item_path = os.path.join(folder_path, item)
-        if not should_keep_in_main(item):
-            if os.path.isfile(item_path) or os.path.islink(item_path):
-                os.remove(item_path)
-            elif os.path.isdir(item_path):
-                shutil.rmtree(item_path)
-
-def clean_extracted_minecraft(minecraft_folder: str) -> None:
-    """
-    Удаляет нежелательные файлы/папки из распакованной .minecraft
-    (IGNORED_FILES, IGNORED_FOLDERS).
-    """
-    for root, dirs, files in os.walk(minecraft_folder, topdown=True):
-        # Удаляем файлы из IGNORED_FILES
-        for fname in files:
-            if fname in IGNORED_FILES:
-                fpath = os.path.join(root, fname)
-                os.remove(fpath)
-
-        # Удаляем папки из IGNORED_FOLDERS
-        dirs_to_remove = []
-        for dname in dirs:
-            if dname in IGNORED_FOLDERS:
-                dirs_to_remove.append(dname)
-
-        for dname in dirs_to_remove:
-            dpath = os.path.join(root, dname)
-            shutil.rmtree(dpath)
-            dirs.remove(dname)
-
-def extract_archive(file_path: str,
-                    extract_to: str,
-                    overwrite: bool = True,
-                    progress_callback: Optional[Callable[[int], None]] = None) -> str:
-    """
-    Распаковывает архив во временную папку, чистит .minecraft,
-    чистит корневую папку от всего, кроме исключений, затем
-    копирует содержимое .minecraft в корневую папку extract_to.
-    """
-    # Создаём временную папку (настоящую system temp directory)
-    temp_extract_folder = tempfile.mkdtemp(prefix="mc_installer_")
-
-    try:
-        # Определяем тип архива и распаковываем
-        if zipfile.is_zipfile(file_path):
-            with zipfile.ZipFile(file_path, 'r') as zip_ref:
-                files = zip_ref.namelist()
-                total_files = len(files)
-                for i, file in enumerate(files):
-                    zip_ref.extract(file, temp_extract_folder)
-                    if progress_callback:
-                        progress_callback(int((i + 1) / total_files * 100))
-
-        elif tarfile.is_tarfile(file_path):
-            with tarfile.open(file_path, 'r:*') as tar_ref:
-                members = tar_ref.getmembers()
-                total_members = len(members)
-                for i, member in enumerate(members):
-                    tar_ref.extract(member, temp_extract_folder)
-                    if progress_callback:
-                        progress_callback(int((i + 1) / total_members * 100))
-        else:
-            raise ValueError("Unsupported archive format.")
-
-        # Проверяем, что в архиве есть .minecraft
-        minecraft_folder = os.path.join(temp_extract_folder, ".minecraft")
-        if not os.path.exists(minecraft_folder):
-            raise FileNotFoundError(".minecraft folder not found in the archive.")
-
-        # Удаляем из распакованной .minecraft ненужные файлы/папки
-        clean_extracted_minecraft(minecraft_folder)
-
-        # Удаляем всё лишнее из корневой папки (extract_to), кроме исключений
-        remove_items_in_main_dir(extract_to)
-
-        # Копируем содержимое .minecraft в корневую папку
-        for item in os.listdir(minecraft_folder):
-            src_path = os.path.join(minecraft_folder, item)
-            dest_path = os.path.join(extract_to, item)
-            if os.path.isdir(src_path):
-                shutil.copytree(src_path, dest_path, dirs_exist_ok=overwrite)
-            else:
-                shutil.copy2(src_path, dest_path)
-
-        return "Archive extracted and .minecraft contents moved successfully."
-
-    except Exception as e:
-        # Здесь можно реализовать логику отката (rollback), если нужно:
-        #   - например, вернуть удалённые файлы обратно из корневой папки,
-        #   - удалить уже скопированные файлы и т.д.
-        raise e
-    finally:
-        # Удаляем временную папку
-        shutil.rmtree(temp_extract_folder, ignore_errors=True)
 
 def download_file(service,
                   file_id: str,
                   save_folder: str,
                   progress_callback: Callable[[int], None]) -> str:
-    """
-    Скачивает файл с Google Drive, обновляя прогресс через progress_callback.
-    """
-    file = service.files().get(fileId=file_id, fields="name, size").execute()
-    file_name = file.get("name", "downloaded_file")
-    file_size = int(file.get("size", 0)) if file.get("size") else 0
+    file_info = service.files().get(fileId=file_id, fields="name, size").execute()
+    file_name = file_info.get("name", "downloaded_file")
+    file_size = int(file_info.get("size", 0)) if file_info.get("size") else 0
 
     request = service.files().get_media(fileId=file_id)
     file_path = os.path.join(save_folder, file_name)
@@ -219,10 +84,7 @@ def download_file(service,
         while not done:
             status, done = downloader.next_chunk()
             if status:
-                # Порой Google не отдаёт точный размер, 
-                # но если всё ок, можно использовать int(status.progress()*100).
                 current_progress = int(status.progress() * 100)
-                # Чтобы не слишком часто дёргать UI, можно слать обновление реже
                 if current_progress - last_progress_sent >= 2:
                     progress_callback(current_progress)
                     last_progress_sent = current_progress
@@ -232,22 +94,20 @@ def download_file(service,
 # ==================== QThread-классы (Workers) ====================
 
 class DownloadWorker(QtCore.QThread):
-    """
-    Фоновый поток для скачивания архива.
-    """
     progress = QtCore.pyqtSignal(int)
     message = QtCore.pyqtSignal(str)
-    finished_ok = QtCore.pyqtSignal(str)  # Вернём путь к файлу
+    finished_ok = QtCore.pyqtSignal(str)
     failed = QtCore.pyqtSignal(str)
 
-    def __init__(self, url: str, save_folder: str):
+    def __init__(self, url: str, save_folder: str, service_account_file: str):
         super().__init__()
         self.url = url
         self.save_folder = save_folder
+        self.service_account_file = service_account_file
 
     def run(self):
         try:
-            service = get_drive_service()
+            service = get_drive_service(self.service_account_file)
             file_id = extract_file_id(self.url)
             file_path = download_file(
                 service=service,
@@ -263,27 +123,28 @@ class DownloadWorker(QtCore.QThread):
         self.progress.emit(value)
 
 class ExtractWorker(QtCore.QThread):
-    """
-    Фоновый поток для распаковки архива и копирования.
-    """
     progress = QtCore.pyqtSignal(int)
     message = QtCore.pyqtSignal(str)
     finished_ok = QtCore.pyqtSignal()
     failed = QtCore.pyqtSignal(str)
 
-    def __init__(self, file_path: str, extract_folder: str):
+    def __init__(self,
+                 file_path: str,
+                 extract_folder: str,
+                 ignored_files: List[str],
+                 ignored_folders: List[str],
+                 keep_in_main: List[str]):
         super().__init__()
         self.file_path = file_path
         self.extract_folder = extract_folder
+        self.ignored_files = ignored_files
+        self.ignored_folders = ignored_folders
+        self.keep_in_main = keep_in_main
 
     def run(self):
         try:
-            result = extract_archive(
-                file_path=self.file_path,
-                extract_to=self.extract_folder,
-                progress_callback=self.on_progress
-            )
-            self.message.emit(result)
+            self.custom_install_process()
+            self.message.emit("Installation steps completed successfully.")
             self.finished_ok.emit()
         except Exception as e:
             self.failed.emit(str(e))
@@ -291,39 +152,286 @@ class ExtractWorker(QtCore.QThread):
     def on_progress(self, value: int):
         self.progress.emit(value)
 
-# ==================== Основной GUI-класс ====================
+    def custom_install_process(self):
+        """
+        1) Создаём папку tmp
+        2) Распаковываем архив => tmp
+        3) Удаляем mods/, configs/ в main
+        4) Удаляем options.txt/server.dat в tmp/.minecraft, но только если они есть в main
+        5) Копируем tmp/.minecraft => main (overwrite)
+        6) Удаляем tmp (и при желании — сам архив)
+        """
+        main_dir = self.extract_folder
+        archive_path = self.file_path
 
+        # 1. Папка tmp
+        tmp_dir = os.path.join(main_dir, "tmp")
+        if not os.path.exists(tmp_dir):
+            os.makedirs(tmp_dir)
+
+        # 2. Распаковать архива => tmp
+        self.extract_to_tmp(archive_path, tmp_dir)
+
+        # 3. Удаляем mods/, configs/ из main
+        self.remove_mods_folders_in_main(main_dir, MODS_FOLDERS)
+
+        # 4. Удаляем options.txt/server.dat в tmp/.minecraft, если они есть в main
+        self.remove_files_in_minecraft_if_in_main(tmp_dir, main_dir, MC_FILES_TO_REMOVE)
+
+        # 5. Копируем tmp/.minecraft => main
+        self.copy_minecraft_to_main(tmp_dir, main_dir)
+
+        # 6. Удаляем tmp
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        # (Если хотите удалять архив — раскомментируйте)
+        # os.remove(archive_path)
+
+    def extract_to_tmp(self, archive_path: str, tmp_dir: str):
+        if zipfile.is_zipfile(archive_path):
+            with zipfile.ZipFile(archive_path, "r") as zip_ref:
+                all_files = zip_ref.namelist()
+                total = len(all_files)
+                for i, member in enumerate(all_files):
+                    zip_ref.extract(member, tmp_dir)
+                    percent = int((i + 1) / total * 100)
+                    self.on_progress(percent)
+        elif tarfile.is_tarfile(archive_path):
+            with tarfile.open(archive_path, "r:*") as tar_ref:
+                all_members = tar_ref.getmembers()
+                total = len(all_members)
+                for i, member in enumerate(all_members):
+                    tar_ref.extract(member, tmp_dir)
+                    percent = int((i + 1) / total * 100)
+                    self.on_progress(percent)
+        else:
+            raise ValueError("Unsupported archive format.")
+
+        # Проверка на наличие .minecraft
+        mc_path = os.path.join(tmp_dir, ".minecraft")
+        if not os.path.exists(mc_path):
+            raise FileNotFoundError("No .minecraft folder found inside the archive.")
+
+    def remove_mods_folders_in_main(self, main_dir: str, folders: List[str]):
+        for folder_name in folders:
+            path_ = os.path.join(main_dir, folder_name)
+            if os.path.isdir(path_):
+                shutil.rmtree(path_, ignore_errors=True)
+                logger.info(f"Removed folder: {path_}")
+
+    def remove_files_in_minecraft_if_in_main(self, tmp_dir: str, main_dir: str, files_to_remove: List[str]):
+        """
+        Удаляем указанные файлы из tmp/.minecraft ТОЛЬКО ЕСЛИ аналогичные есть в main_dir.
+        """
+        mc_path = os.path.join(tmp_dir, ".minecraft")
+        if not os.path.exists(mc_path):
+            return
+
+        for fname in files_to_remove:
+            main_path = os.path.join(main_dir, fname)
+            # Проверяем, есть ли такой файл в main_dir:
+            if not os.path.exists(main_path):
+                # значит не удаляем его в tmp
+                continue
+
+            # Если в main есть, то удаляем во всём tmp/.minecraft
+            for root, dirs, files in os.walk(mc_path, topdown=True):
+                if fname in files:
+                    f_path = os.path.join(root, fname)
+                    os.remove(f_path)
+                    logger.info(f"Removed file in tmp: {f_path}")
+
+    def copy_minecraft_to_main(self, tmp_dir: str, main_dir: str):
+        mc_path = os.path.join(tmp_dir, ".minecraft")
+        if not os.path.exists(mc_path):
+            return
+        for item in os.listdir(mc_path):
+            src = os.path.join(mc_path, item)
+            dst = os.path.join(main_dir, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+        logger.info(f"Copied .minecraft contents from {mc_path} to {main_dir}")
+
+# ===================== Класс бескаркасного окна =====================
+class FramelessMainWindow(QtWidgets.QMainWindow):
+    """
+    Модель «бескаркасного» окна с кастомным заголовком, который можно перетаскивать.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent, flags=Qt.FramelessWindowHint | Qt.WindowSystemMenuHint)
+        self._old_pos = None
+
+        # Устанавливаем тёмный фон самого окна
+        self.setStyleSheet("background-color: #2F2F2F;")
+        self.setWindowTitle("Minecraft Installer (MC-Style) [Frameless]")
+        self.setWindowIcon(QIcon("assets/minecraft_icon.png"))
+
+        # Кнопки заголовка
+        self.title_bar = QtWidgets.QWidget(self)
+        self.title_bar.setObjectName("title_bar")
+        self.title_bar.setStyleSheet("background-color: #2F2F2F; color: #FFFFFF;")
+        self.title_bar.setFixedHeight(40)
+
+        self.title_layout = QtWidgets.QHBoxLayout(self.title_bar)
+        self.title_layout.setContentsMargins(5, 0, 5, 0)
+        self.title_layout.setSpacing(5)
+
+        # Кнопка "Закрыть"
+        self.close_button = QtWidgets.QPushButton("X", self.title_bar)
+        self.close_button.setFixedSize(30, 30)
+        self.close_button.clicked.connect(self.close)
+
+        # Кнопка "Свернуть"
+        self.min_button = QtWidgets.QPushButton("-", self.title_bar)
+        self.min_button.setFixedSize(30, 30)
+        self.min_button.clicked.connect(self.showMinimized)
+
+        # Заголовок (текст)
+        self.title_label = QtWidgets.QLabel("Minecraft Installer (Frameless)", self.title_bar)
+        self.title_label.setStyleSheet("color: #FFFFFF; font-weight: bold;")
+
+        self.title_layout.addWidget(self.title_label)
+        self.title_layout.addStretch(1)
+        self.title_layout.addWidget(self.min_button)
+        self.title_layout.addWidget(self.close_button)
+
+        # Основной layout
+        self.main_widget = QtWidgets.QWidget(self)
+        self.main_layout = QtWidgets.QVBoxLayout(self.main_widget)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
+        # Добавляем title_bar + содержимое
+        self.main_layout.addWidget(self.title_bar)
+
+        # Далее создаём QTabWidget (с «MC-Style» UI)
+        self.tab_widget = MinecraftInstallerUI()
+        # Добавляем QTabWidget
+        self.main_layout.addWidget(self.tab_widget)
+
+        self.setCentralWidget(self.main_widget)
+        self.setMinimumSize(600, 500)
+
+    def mousePressEvent(self, event):
+        """
+        Для перетаскивания окна — если нажали в title_bar (не на кнопки).
+        """
+        if event.button() == Qt.LeftButton:
+            # Проверяем, где нажали
+            if event.pos().y() <= self.title_bar.height():
+                self._old_pos = event.globalPos()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._old_pos = None
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._old_pos is not None:
+            delta = QtCore.QPoint(event.globalPos() - self._old_pos)
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self._old_pos = event.globalPos()
+        super().mouseMoveEvent(event)
+
+# ==================== Основной класс (QTabWidget) ====================
 class MinecraftInstallerUI(QtWidgets.QTabWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Minecraft Installer (Refactored)")
-        self.setMinimumSize(500, 400)
+        # Ниже вся логика вкладок, стилизации и т. п.
+        # (Практически та же, что была в предыдущих примерах.)
+
+        self.setStyleSheet("""
+            QTabWidget::pane {
+                background-color: #3B3B3B;
+                border: 2px solid #000;
+            }
+            QTabBar::tab {
+                background: #4F4F4F;
+                color: #FFFFFF;
+                padding: 8px;
+                border: 1px solid #222;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #7F7F7F;
+            }
+            QWidget {
+                background-color: #2F2F2F;
+                color: #FFFFFF;
+            }
+            QLineEdit {
+                background-color: #444444;
+                border: 1px solid #888;
+                padding: 4px;
+            }
+            QPlainTextEdit {
+                background-color: #444444;
+                border: 1px solid #888;
+                color: #FFFFFF;
+            }
+            QPushButton {
+                background-color: #666666;
+                border: 1px solid #888;
+                padding: 6px;
+            }
+            QPushButton:hover {
+                background-color: #999999;
+            }
+            QProgressBar {
+                background-color: #444444;
+                border: 1px solid #888;
+                text-align: center;
+                color: #fff;
+            }
+            QProgressBar::chunk {
+                background-color: #06B025; 
+            }
+            QMessageBox {
+                background-color: #2F2F2F;
+            }
+        """)
+
+        # Параметры по умолчанию
+        self.ignored_files: List[str] = ["options.txt", "servers.dat"]
+        self.ignored_folders: List[str] = ["logs"]
+        self.keep_in_main:  List[str] = ["saves", "xaero", "distant_horizons_server_data"]
+
+        self.service_account_file = os.path.join(
+            os.path.dirname(__file__),
+            "fc-auto-installer-3b84891aacd2.json"
+        )
 
         # Лог-виджет
         self.log_area = QtWidgets.QListWidget()
-        # Создаём и добавляем наш обработчик логов
         self.log_handler = QtLogHandler(self.log_area)
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
         self.log_handler.setFormatter(formatter)
         logger.addHandler(self.log_handler)
+
+        self.selected_folder = ""
 
         self.init_ui()
 
     def init_ui(self):
         self.download_tab = QtWidgets.QWidget()
         self.logs_tab = QtWidgets.QWidget()
+        self.exclusions_tab = QtWidgets.QWidget()
 
         self.addTab(self.download_tab, "Download/Extract")
         self.addTab(self.logs_tab, "Logs")
+        self.addTab(self.exclusions_tab, "Exclusions")
 
         self.setup_download_tab()
         self.setup_logs_tab()
+        self.setup_exclusions_tab()
 
     def setup_download_tab(self):
         layout = QtWidgets.QVBoxLayout()
 
         self.url_input = QtWidgets.QLineEdit()
-        self.url_input.setPlaceholderText("Enter Google Drive URL")
+        self.url_input.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.url_input.setPlaceholderText("Enter Google Drive URL (hidden)")
         layout.addWidget(self.url_input)
 
         self.select_folder_button = QtWidgets.QPushButton("Select Folder")
@@ -352,30 +460,46 @@ class MinecraftInstallerUI(QtWidgets.QTabWidget):
         layout.addWidget(self.log_area)
         self.logs_tab.setLayout(layout)
 
-    # =========================================
-    #      Слот-методы для GUI
-    # =========================================
+    def setup_exclusions_tab(self):
+        layout = QtWidgets.QVBoxLayout()
+
+        layout.addWidget(QtWidgets.QLabel("Ignored Files (one per line):"))
+        self.ignored_files_edit = QtWidgets.QPlainTextEdit("\n".join(self.ignored_files))
+        layout.addWidget(self.ignored_files_edit)
+
+        layout.addWidget(QtWidgets.QLabel("Ignored Folders (one per line):"))
+        self.ignored_folders_edit = QtWidgets.QPlainTextEdit("\n".join(self.ignored_folders))
+        layout.addWidget(self.ignored_folders_edit)
+
+        layout.addWidget(QtWidgets.QLabel("Keep in Main (substrings, one per line):"))
+        self.keep_in_main_edit = QtWidgets.QPlainTextEdit("\n".join(self.keep_in_main))
+        layout.addWidget(self.keep_in_main_edit)
+
+        save_button = QtWidgets.QPushButton("Save Exclusions")
+        save_button.clicked.connect(self.save_exclusions)
+        layout.addWidget(save_button)
+
+        layout.addStretch()
+        self.exclusions_tab.setLayout(layout)
+
+    # ----------------- СЛОТЫ/ОБРАБОТЧИКИ -----------------
 
     def select_folder(self):
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select folder to install .minecraft")
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select folder (main)")
         if folder:
             self.selected_folder = folder
             logger.info(f"Selected folder: {folder}")
 
     def start_download_and_extract(self):
-        """
-        Кнопка "Download and Extract"
-        """
         url = self.url_input.text()
         if not self.validate_url(url):
             logger.error("Invalid Google Drive URL.")
             return
 
-        if not hasattr(self, 'selected_folder') or not os.path.isdir(self.selected_folder):
+        if not os.path.isdir(self.selected_folder):
             logger.error("Invalid folder selected.")
             return
 
-        # Проверяем интернет (опционально)
         if not check_internet_connection():
             logger.error("No internet connection detected.")
             return
@@ -384,8 +508,7 @@ class MinecraftInstallerUI(QtWidgets.QTabWidget):
         self.status_label.setText("Status: Downloading...")
         self.toggle_buttons(False)
 
-        # 1. Скачиваем
-        self.download_worker = DownloadWorker(url, self.selected_folder)
+        self.download_worker = DownloadWorker(url, self.selected_folder, self.service_account_file)
         self.download_worker.progress.connect(self.update_progress_bar)
         self.download_worker.message.connect(lambda msg: logger.info(msg))
         self.download_worker.finished_ok.connect(self.on_download_finished_ok)
@@ -393,15 +516,17 @@ class MinecraftInstallerUI(QtWidgets.QTabWidget):
         self.download_worker.start()
 
     def on_download_finished_ok(self, file_path: str):
-        """
-        Вызывается, когда загрузка успешно завершена.
-        Делаем второй этап — распаковку.
-        """
         logger.info(f"Downloaded file: {file_path}")
         self.progress_bar.setValue(0)
         self.status_label.setText("Status: Extracting...")
 
-        self.extract_worker = ExtractWorker(file_path, self.selected_folder)
+        self.extract_worker = ExtractWorker(
+            file_path=file_path,
+            extract_folder=self.selected_folder,
+            ignored_files=self.ignored_files,
+            ignored_folders=self.ignored_folders,
+            keep_in_main=self.keep_in_main
+        )
         self.extract_worker.progress.connect(self.update_progress_bar)
         self.extract_worker.message.connect(lambda msg: logger.info(msg))
         self.extract_worker.finished_ok.connect(self.on_extract_finished_ok)
@@ -424,17 +549,14 @@ class MinecraftInstallerUI(QtWidgets.QTabWidget):
         self.toggle_buttons(True)
 
     def start_extract_only(self):
-        """
-        Кнопка "Extract Only"
-        """
-        if not hasattr(self, 'selected_folder') or not os.path.isdir(self.selected_folder):
+        if not os.path.isdir(self.selected_folder):
             logger.error("Invalid folder selected.")
             return
 
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Select an archive to extract",
-            filter="Archives (*.zip *.tar *.tar.gz *.tgz)"
+            filter="Archives (*.zip *.tar *.tar.gz *.tgz *.rar)"
         )
         if not file_path:
             logger.error("No archive selected.")
@@ -444,7 +566,13 @@ class MinecraftInstallerUI(QtWidgets.QTabWidget):
         self.status_label.setText("Status: Extracting...")
         self.toggle_buttons(False)
 
-        self.extract_worker = ExtractWorker(file_path, self.selected_folder)
+        self.extract_worker = ExtractWorker(
+            file_path=file_path,
+            extract_folder=self.selected_folder,
+            ignored_files=self.ignored_files,
+            ignored_folders=self.ignored_folders,
+            keep_in_main=self.keep_in_main
+        )
         self.extract_worker.progress.connect(self.update_progress_bar)
         self.extract_worker.message.connect(lambda msg: logger.info(msg))
         self.extract_worker.finished_ok.connect(self.on_extract_finished_ok)
@@ -463,10 +591,28 @@ class MinecraftInstallerUI(QtWidgets.QTabWidget):
     def validate_url(self, url: str) -> bool:
         return url.startswith("https://") and "drive.google.com" in url
 
-# ==================== Запуск приложения ====================
+    def save_exclusions(self):
+        files_text = self.ignored_files_edit.toPlainText().strip()
+        folders_text = self.ignored_folders_edit.toPlainText().strip()
+        keep_text = self.keep_in_main_edit.toPlainText().strip()
+
+        self.ignored_files = [line.strip() for line in files_text.splitlines() if line.strip()]
+        self.ignored_folders = [line.strip() for line in folders_text.splitlines() if line.strip()]
+        self.keep_in_main = [line.strip() for line in keep_text.splitlines() if line.strip()]
+
+        logger.info("Exclusions updated:")
+        logger.info(f"  Ignored files: {self.ignored_files}")
+        logger.info(f"  Ignored folders: {self.ignored_folders}")
+        logger.info(f"  Keep in main:  {self.keep_in_main}")
+
+        QtWidgets.QMessageBox.information(self, "Exclusions", "Exclusions have been saved successfully.")
+
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
-    window = MinecraftInstallerUI()
+
+    # Запускаем бескаркасное окно
+    window = FramelessMainWindow()
     window.show()
+
     sys.exit(app.exec_())

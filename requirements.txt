@@ -1,4 +1,3 @@
 PyQt5
 google-api-python-client
 pyinstaller
-pyinstaller-appimage

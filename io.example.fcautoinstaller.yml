@@ -1,0 +1,24 @@
+app-id: io.example.fcautoinstaller
+runtime: org.freedesktop.Platform
+runtime-version: "22.08"
+sdk: org.freedesktop.Sdk
+command: fc-auto-installer
+modules:
+  - name: fc-auto-installer
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-cache-dir -r /app/requirements.txt --prefix=/app
+      - pyinstaller --noconfirm --clean --onedir --windowed \
+          --icon=assets/minecraft_icon.ico \
+          --add-data=/app/fc-auto-installer-3b84891aacd2.json:. \
+          fc-auto-installer.py
+      - install -Dm755 dist/fc-auto-installer/fc-auto-installer /app/bin/fc-auto-installer
+    sources:
+      - type: file
+        path: fc-auto-installer.py
+      - type: file
+        path: requirements.txt
+      - type: file
+        path: fc-auto-installer-3b84891aacd2.json
+      - type: dir
+        path: assets

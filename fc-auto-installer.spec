@@ -5,7 +5,7 @@ a = Analysis(
     ['fc-auto-installer.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:/Users/slovn/.json/fc-auto-installer-3b84891aacd2.json', '.')],
+    datas=[('/home/sl/fc-auto-installer-3b84891aacd2.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['assets\\minecraft_icon.ico'],
+    icon=['assets/minecraft_icon.ico'],
 )

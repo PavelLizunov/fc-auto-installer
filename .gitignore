@@ -2,7 +2,6 @@
 /venv_wsl
 /.flatpak-builder
 /builddir
+/build/fc-auto-installer
 /build
-/dist
-/fc-auto-installer-3b84891aacd2.json
 /fc-auto-installer-3b84891aacd2.spec
